@@ -1,0 +1,59 @@
+# Production orchestration for Waaie (Coolify "Docker Compose" build pack).
+#
+# Architecture: a single public origin (waaie.feraswe.com) served by the
+# frontend's nginx. nginx reverse-proxies /api/* to the backend over this
+# private Docker network, so the backend needs NO public route, NO subdomain,
+# and NO external DNS. The app is fully self-contained and stays up regardless
+# of the local development machine.
+#
+# Edge routing: the `frontend` service joins Coolify's external proxy network
+# (`coolify`) so Traefik can reach it. The public domain is set in the Coolify
+# UI ("Domains for frontend") as the single source of truth — no magic
+# SERVICE_FQDN var here. The backend stays on the private `internal` network
+# only, so it has no public route.
+
+services:
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    networks:
+      - internal
+    environment:
+      # Same-origin requests no longer trigger CORS, but keep a sane explicit
+      # value for any direct/external callers. Override in Coolify if needed.
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://waaie.feraswe.com}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      RATE_LIMIT: ${RATE_LIMIT:-20/minute}
+    # Internal only — reachable from `frontend` as http://backend:8000.
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    networks:
+      # `internal` for the nginx -> backend hop; `coolify-infra` exposes it to
+      # Coolify's Traefik proxy. Domain is configured in the Coolify UI.
+      - internal
+      - coolify-infra
+    # The single public-facing service. Coolify's Traefik routes the FQDN here.
+    expose:
+      - "80"
+
+networks:
+  internal:
+    driver: bridge
+  coolify-infra:
+    external: true
+    name: coolify
