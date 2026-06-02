@@ -3,12 +3,12 @@ import re
 import pytest
 
 from tests.contract import MIXED_IN_SCOPE_ANSWER, REFUSAL_MESSAGE
-from model import SYSTEM_INSTRUCTION, GeminiMentor, detect_language
+from model import SYSTEM_INSTRUCTION, DeepSeekMentor, detect_language
 
 
 @pytest.fixture
 def mentor():
-    return GeminiMentor()
+    return DeepSeekMentor()
 
 
 def test_model_initialization(mentor):
@@ -54,9 +54,9 @@ def test_whitespace_question(mentor):
 
 def test_missing_api_key(monkeypatch):
     # With no key in the environment, construction must fail fast.
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
-        GeminiMentor(api_key=None)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="DEEPSEEK_API_KEY"):
+        DeepSeekMentor(api_key=None)
 
 
 # --------------------------------------------------------------------------- #
@@ -70,7 +70,7 @@ def test_refusal_string_matches_system_prompt():
 
 def test_scenario_a_in_scope_query(mentor):
     """(a) Valid in-scope query -> structured, non-empty, language-tagged."""
-    result = mentor.get_answer("What is the CIA triad?")
+    result = mentor.get_answer("Solve the equation x^2 - 5x + 6 = 0")
 
     assert set(result) == {"answer", "language"}
     assert result["language"] == "en"
@@ -84,7 +84,7 @@ def test_scenario_a_in_scope_query(mentor):
     [
         "كيف أطبخ الكبسة؟",          # cooking (Arabic)
         "Give me a recipe for pasta",  # cooking (English -> still refused in Arabic)
-        "Solve the integral ∫ x² dx",  # pure calculus
+        "من فاز في مباراة كرة القدم؟",  # sports (out of curriculum scope)
     ],
 )
 def test_scenario_b_out_of_scope_exact_refusal(mentor, question):
@@ -111,10 +111,13 @@ def test_scenario_c_mixed_query_filters_out_of_scope(mentor):
 
 def test_empty_model_response_raises(mentor, monkeypatch):
     """A blank upstream response is surfaced as a RuntimeError, not '' answer."""
+    blank_message = type("_M", (), {"content": ""})()
+    blank_choice = type("_C", (), {"message": blank_message})()
+    blank = type("_Blank", (), {"choices": [blank_choice]})()
     monkeypatch.setattr(
-        mentor.client.models,
-        "generate_content",
-        lambda **kwargs: type("_Blank", (), {"text": ""})(),
+        mentor.client.chat.completions,
+        "create",
+        lambda **kwargs: blank,
     )
     with pytest.raises(RuntimeError, match="empty response"):
         mentor.get_answer("What is TCP?")

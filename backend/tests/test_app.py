@@ -23,7 +23,7 @@ def test_health_check():
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "healthy"
-    assert body["provider"] == "gemini"
+    assert body["provider"] == "deepseek"
     assert body["model"]
 
 
@@ -83,7 +83,9 @@ def test_invalid_input(invalid_input):
 
 def test_scenario_a_in_scope_returns_200_and_structure():
     """(a) Valid in-scope query -> 200 OK with the full success envelope."""
-    response = client.post("/ask", json={"question": "What is the CIA triad?"})
+    response = client.post(
+        "/ask", json={"question": "Solve the equation x^2 - 5x + 6 = 0"}
+    )
     assert response.status_code == 200
 
     body = response.json()
@@ -100,7 +102,7 @@ def test_scenario_a_in_scope_returns_200_and_structure():
     [
         "كيف أطبخ الكبسة؟",          # cooking (Arabic)
         "Give me a recipe for pasta",  # cooking (English -> refused in Arabic)
-        "Solve the integral ∫ x² dx",  # pure calculus
+        "من فاز في مباراة كرة القدم؟",  # sports (out of curriculum scope)
     ],
 )
 def test_scenario_b_out_of_scope_exact_arabic_refusal(question):
@@ -136,17 +138,17 @@ def test_scenario_c_mixed_query_answers_in_scope_only():
 def test_upstream_failure_maps_to_502(monkeypatch):
     """Any non-ValueError from the model surfaces as 502 Bad Gateway."""
     def _boom(_question):
-        raise RuntimeError("simulated Gemini outage")
+        raise RuntimeError("simulated DeepSeek outage")
 
     monkeypatch.setattr(app_module.mentor, "get_answer", _boom)
 
     response = client.post("/ask", json={"question": "What is TCP?"})
     assert response.status_code == 502
-    assert "Gemini request failed" in response.json()["detail"]
+    assert "DeepSeek request failed" in response.json()["detail"]
 
 
 def test_health_unhealthy_maps_to_503(monkeypatch):
-    """If the Gemini client is missing, /health reports 503."""
+    """If the DeepSeek client is missing, /health reports 503."""
     monkeypatch.setattr(app_module.mentor, "client", None)
 
     response = client.get("/health")

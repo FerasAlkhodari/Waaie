@@ -152,8 +152,8 @@ This keeps the architecture simple and avoids a second model hop, at the cost of
 ```mermaid
 stateDiagram-v2
     [*] --> Classify
-    Classify --> InScope: CS / IT topic
-    Classify --> OutOfScope: cooking, history, pure math, …
+    Classify --> InScope: one of the five subjects
+    Classify --> OutOfScope: cooking, sports, entertainment, …
     Classify --> Mixed: in-scope + out-of-scope
     InScope --> Answer: structured markdown, user's language
     Mixed --> Answer: answer in-scope part only
@@ -167,16 +167,15 @@ stateDiagram-v2
 Out-of-scope inputs yield **only** this string (no preamble, no translation):
 
 ```text
-أنا هنا كمساعد ومتخصص في مجالات علوم الحاسب وتقنية المعلومات فقط.
-يسعدني الإجابة على أي سؤال يخص البرمجة، الشبكات، أو الأمن السيبراني!
+أنا واعي، مساعدك الدراسي المخصّص حصريًا لمواد المرحلة الثانوية في المملكة العربية السعودية: الرياضيات، الفيزياء، الكيمياء، الأحياء وعلوم الأرض والفضاء، والتقنية الرقمية والحاسب. لا يمكنني مساعدتك في هذا الطلب لأنه خارج نطاق هذه المواد، لكن يسعدني الإجابة عن أي سؤال ضمنها.
 ```
 
 ### 4.4 Edge cases
 
 | Case | Expected behavior |
 |---|---|
-| Math in an ML context (e.g. "gradient descent derivative") | ✅ Answered — framed in CS/ML |
-| Pure calculus (e.g. "∫ x² dx") | ❌ Refused |
+| Calculus / integration (e.g. "∫ x² dx") | ✅ Answered — Mathematics is in scope |
+| Physics word problem (e.g. "Newton's second law") | ✅ Answered with step-by-step reasoning |
 | Mixed ("explain TCP and also a pasta recipe") | ✅ Answers TCP only, ignores the recipe |
 | English out-of-scope question | ❌ Refused **in Arabic** (refusal language is fixed) |
 
@@ -263,12 +262,12 @@ Every guardrail branch is exercised at **both** the model layer and the HTTP lay
 
 | # | Scenario | Example input | Expected | Model test | HTTP test |
 |---|---|---|---|---|---|
-| a | **In-scope** | `What is the CIA triad?` | `200` + `{answer, language:"en"}`, non-empty, ≠ refusal | `test_scenario_a_in_scope_query` | `test_scenario_a_in_scope_returns_200_and_structure` |
-| b | **Out-of-scope** | `كيف أطبخ الكبسة؟` · `recipe for pasta` · `∫ x² dx` | `200` + body is **exactly** the Arabic refusal, zero extra text | `test_scenario_b_out_of_scope_exact_refusal` | `test_scenario_b_out_of_scope_exact_arabic_refusal` |
+| a | **In-scope** | `Solve the equation x^2 - 5x + 6 = 0` | `200` + `{answer, language:"en"}`, non-empty, ≠ refusal | `test_scenario_a_in_scope_query` | `test_scenario_a_in_scope_returns_200_and_structure` |
+| b | **Out-of-scope** | `كيف أطبخ الكبسة؟` · `recipe for pasta` · `من فاز في مباراة كرة القدم؟` | `200` + body is **exactly** the Arabic refusal, zero extra text | `test_scenario_b_out_of_scope_exact_refusal` | `test_scenario_b_out_of_scope_exact_arabic_refusal` |
 | c | **Mixed** | `Explain TCP/IP and give me a pasta recipe` | `200`, answers TCP/IP only — `pasta`/`recipe` absent | `test_scenario_c_mixed_query_filters_out_of_scope` | `test_scenario_c_mixed_query_answers_in_scope_only` |
 
 > [!NOTE]
-> Scenario **b** is parametrized over three inputs (Arabic cooking, English cooking, pure calculus) and asserts an **exact** string match — proving the refusal carries *no* preamble or translation and stays Arabic even for an English prompt. A cross-check (`test_refusal_string_matches_system_prompt`) asserts the stub's refusal byte-matches `SYSTEM_INSTRUCTION`, so the contract can't silently drift.
+> Scenario **b** is parametrized over three inputs (Arabic cooking, English cooking, sports) and asserts an **exact** string match — proving the refusal carries *no* preamble or translation and stays Arabic even for an English prompt. A cross-check (`test_refusal_string_matches_system_prompt`) asserts the stub's refusal byte-matches `SYSTEM_INSTRUCTION`, so the contract can't silently drift.
 
 ### 7.3 Route coverage distribution
 

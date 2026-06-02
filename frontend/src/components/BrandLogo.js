@@ -1,7 +1,7 @@
 import React, { useId } from 'react';
 
 // Minimalist Waaie mark: a mentor/security shield fused with a
-// terminal prompt (>_). Silver/zinc gradient body, amber cyber-accent
+// terminal prompt (>_). Silver/slate gradient body, teal cyber-accent
 // glyph. Gradient IDs are namespaced via useId so multiple inline
 // instances never collide in the DOM.
 function BrandLogo({ className = 'h-9 w-9' }) {
@@ -30,8 +30,8 @@ function BrandLogo({ className = 'h-9 w-9' }) {
           <stop offset="1" stopColor="#101013" />
         </linearGradient>
         <linearGradient id={accent} x1="15" y1="15" x2="27" y2="25" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#f0c896" />
-          <stop offset="1" stopColor="#c98a4a" />
+          <stop stopColor="#5eead4" />
+          <stop offset="1" stopColor="#0d9488" />
         </linearGradient>
       </defs>
 

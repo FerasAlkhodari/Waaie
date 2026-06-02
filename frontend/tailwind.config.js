@@ -9,9 +9,9 @@ module.exports = {
       },
       colors: {
         accent: {
-          DEFAULT: '#e0a86b',
-          soft: '#f0c896',
-          deep: '#c98a4a',
+          DEFAULT: '#2dd4bf',
+          soft: '#5eead4',
+          deep: '#0d9488',
         },
       },
       boxShadow: {
@@ -29,8 +29,8 @@ module.exports = {
           '100%': { opacity: '1' },
         },
         'glow-ring': {
-          '0%, 100%': { boxShadow: '0 0 0 0 rgba(224,168,107,0.0)' },
-          '50%': { boxShadow: '0 0 0 4px rgba(224,168,107,0.10)' },
+          '0%, 100%': { boxShadow: '0 0 0 0 rgba(45,212,191,0.0)' },
+          '50%': { boxShadow: '0 0 0 4px rgba(45,212,191,0.12)' },
         },
       },
       animation: {

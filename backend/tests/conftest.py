@@ -1,12 +1,12 @@
-"""Shared pytest setup: offline key + guardrail-aware Gemini patch.
+"""Shared pytest setup: offline key + guardrail-aware DeepSeek patch.
 
-These tests run fully offline and without a real Gemini API key. We set a dummy
-key and replace ``genai.Client`` with the guardrail-aware ``FakeClient`` from
-``tests.contract`` so ``generate_content`` emulates the scope contract encoded
-in ``model.SYSTEM_INSTRUCTION`` — with zero network calls.
+These tests run fully offline and without a real DeepSeek API key. We set a
+dummy key and replace ``openai.OpenAI`` with the guardrail-aware ``FakeClient``
+from ``tests.contract`` so ``chat.completions.create`` emulates the scope
+contract encoded in ``model.SYSTEM_INSTRUCTION`` — with zero network calls.
 
 The patch is applied at import time — before any test module imports ``app``
-(which builds a GeminiMentor at module load) — so the real network client is
+(which builds a DeepSeekMentor at module load) — so the real network client is
 never constructed.
 """
 
@@ -21,15 +21,17 @@ import pytest
 backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
 
-# A dummy key satisfies GeminiMentor's fail-fast check without being real.
-os.environ.setdefault("GEMINI_API_KEY", "test-key-not-real")
+# A dummy key satisfies DeepSeekMentor's fail-fast check without being real.
+os.environ.setdefault("DEEPSEEK_API_KEY", "test-key-not-real")
 
-from google import genai  # noqa: E402
+import openai  # noqa: E402
 
 from tests.contract import FakeClient  # noqa: E402
 
-# Patch the SDK entry point so no real network client is ever created.
-genai.Client = FakeClient
+# Patch the SDK entry point so no real network client is ever created. This
+# runs before any test imports ``model``/``app``, so model.py's
+# ``from openai import OpenAI`` picks up the fake.
+openai.OpenAI = FakeClient
 
 
 @pytest.fixture(autouse=True)

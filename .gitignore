@@ -7,7 +7,7 @@ venv/
 .coverage
 htmlcov/
 
-# Environment — NEVER commit real secrets (GEMINI_API_KEY lives here)
+# Environment — NEVER commit real secrets (DEEPSEEK_API_KEY lives here)
 .env
 .env.*
 !.env.example
