@@ -24,12 +24,12 @@ _ARABIC_RE = re.compile(r"[؀-ۿ]")
 EN_ANSWER = "This is a test answer within a Saudi high-school subject."
 AR_ANSWER = "هذه إجابة تجريبية ضمن مواد المرحلة الثانوية."
 
-# The EXACT out-of-scope refusal — must byte-match model.SYSTEM_INSTRUCTION.
+# The EXACT refusal (harmful/unsafe or non-educational spam) — must byte-match
+# model.SYSTEM_INSTRUCTION / model.REFUSAL_MESSAGE.
 REFUSAL_MESSAGE = (
-    "أنا واعي، مساعدك الدراسي المخصّص حصريًا لمواد المرحلة الثانوية في المملكة "
-    "العربية السعودية: الرياضيات، الفيزياء، الكيمياء، الأحياء وعلوم الأرض "
-    "والفضاء، والتقنية الرقمية والحاسب. لا يمكنني مساعدتك في هذا الطلب لأنه خارج "
-    "نطاق هذه المواد، لكن يسعدني الإجابة عن أي سؤال ضمنها."
+    "أنا واعي، مساعدك الدراسي الذكي. يسعدني مساعدتك في أي سؤال علمي أو أكاديمي "
+    "أو تقني أو برمجي. لكن لا يمكنني المساعدة في هذا الطلب تحديدًا لأنه ضار أو "
+    "غير آمن أو لا يحمل أي طابع تعليمي. اطرح عليّ أي سؤال دراسي ويسعدني شرحه لك."
 )
 
 # In a mixed prompt the model answers only the in-scope part — never the

@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import axios from 'axios';
 import App from './App';
 
@@ -35,8 +35,10 @@ test('sends a question, shows the user bubble, then the bot answer', async () =>
   render(<App />);
   ask('What is the CIA triad?');
 
-  // The user's question appears immediately.
-  expect(screen.getByText('What is the CIA triad?')).toBeInTheDocument();
+  // The user's question appears immediately in the chat (the sidebar also
+  // shows it as the session title, so scope the assertion to the chat region).
+  const chat = screen.getByRole('main');
+  expect(within(chat).getByText('What is the CIA triad?')).toBeInTheDocument();
   // The bot answer arrives via the (stubbed) markdown renderer.
   await waitFor(() =>
     expect(screen.getByText('The CIA triad: C, I, A.')).toBeInTheDocument()
@@ -86,9 +88,14 @@ test('finally block unmounts the indicator even when the request fails', async (
 
   rejectRequest({ response: { data: { detail: 'Server error' } } });
 
-  // Indicator is torn down (finally) and an error bubble replaces it.
+  // Indicator is torn down (finally) and an error bubble replaces it. The app
+  // never leaks raw server detail — every failure collapses to one friendly,
+  // motivational Arabic message.
   await waitFor(() =>
     expect(screen.queryByText(TYPING_LABEL)).not.toBeInTheDocument()
   );
-  expect(screen.getByText('Server error')).toBeInTheDocument();
+  expect(screen.queryByText('Server error')).not.toBeInTheDocument();
+  expect(
+    screen.getByText(/يرجى إعادة إرسال سؤالك مرة أخرى/)
+  ).toBeInTheDocument();
 });

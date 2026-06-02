@@ -1,4 +1,6 @@
 import os
+import uuid
+from typing import Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -10,6 +12,7 @@ from slowapi.util import get_remote_address
 
 from documents import SUPPORTED_EXTENSIONS, DocumentParseError, extract_text
 from model import DeepSeekMentor
+from session import SessionStore
 
 load_dotenv()
 
@@ -59,6 +62,11 @@ app.add_middleware(
 # Initialize the DeepSeek-backed mentor. Fails fast if DEEPSEEK_API_KEY is unset.
 mentor = DeepSeekMentor()
 
+# Process-local conversation memory. The window (last N turns) is configurable
+# via CHAT_HISTORY_TURNS; each turn is one user + one assistant message.
+_HISTORY_TURNS = int(os.getenv("CHAT_HISTORY_TURNS", "10"))
+sessions = SessionStore(max_messages=_HISTORY_TURNS * 2)
+
 
 RATE_LIMIT = os.getenv("RATE_LIMIT", "20/minute")
 
@@ -78,6 +86,16 @@ class Question(BaseModel):
             "A Saudi high-school subject question — Mathematics, Physics, "
             "Chemistry, Biology/Earth & Space Sciences, or Digital "
             "Technology & Computer Science — to ask the mentor."
+        ),
+    )
+    session_id: Optional[str] = Field(
+        default=None,
+        max_length=64,
+        description=(
+            "Optional conversation id. Pass the session_id returned by a "
+            "previous response to continue the same chat (the mentor will "
+            "remember recent turns and any uploaded document). Omit it to "
+            "start a fresh conversation; a new id is then returned."
         ),
     )
 
@@ -112,11 +130,21 @@ async def root():
 @app.post("/ask")
 @limiter.limit(RATE_LIMIT)
 async def ask_question(request: Request, question: Question):
+    # Resume the given conversation, or start a new one and hand back its id.
+    session_id = (question.session_id or "").strip() or str(uuid.uuid4())
     try:
-        result = mentor.get_answer(question.question)
+        history = sessions.history(session_id)
+        # If a document was uploaded earlier in this session, keep answering
+        # follow-up questions against it.
+        document = sessions.document(session_id)
+        result = mentor.get_answer(
+            question.question, context=document, history=history
+        )
+        sessions.add_turn(session_id, question.question, result["answer"])
         return {
             "status": "success",
             "message": "Answer generated",
+            "session_id": session_id,
             "data": {
                 "answer": result["answer"],
                 "language": result["language"],
@@ -134,7 +162,10 @@ async def ask_document(
     request: Request,
     file: UploadFile = File(...),
     question: str = Form(""),
+    session_id: str = Form(""),
 ):
+    session_id = session_id.strip() or str(uuid.uuid4())
+
     data = await file.read()
 
     if not data:
@@ -151,13 +182,22 @@ async def ask_document(
     except DocumentParseError as de:
         raise HTTPException(status_code=400, detail=str(de))
 
+    # Persist the document on the session so later /ask follow-ups can reference
+    # it without re-uploading.
+    sessions.set_document(session_id, document_text)
+
     prompt = question.strip() or DEFAULT_DOC_PROMPT
 
     try:
-        result = mentor.get_answer(prompt, context=document_text)
+        history = sessions.history(session_id)
+        result = mentor.get_answer(
+            prompt, context=document_text, history=history
+        )
+        sessions.add_turn(session_id, prompt, result["answer"])
         return {
             "status": "success",
             "message": "Answer generated from document",
+            "session_id": session_id,
             "data": {
                 "answer": result["answer"],
                 "language": result["language"],
