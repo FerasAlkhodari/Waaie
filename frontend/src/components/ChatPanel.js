@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import MarkdownMessage from './MarkdownMessage';
 import BrandLogo from './BrandLogo';
 import VoiceCall from './VoiceCall';
@@ -106,6 +106,18 @@ const BotBubble = React.memo(function BotBubble({ text, isError }) {
           <MarkdownMessage content={text} />
         )}
       </div>
+    </div>
+  );
+});
+
+// Centered, non-vocal pill marking a voice-call lifecycle event in the chat
+// (e.g. "⚡ call started" / "🛑 call ended"). Distinct from user/bot bubbles.
+const SystemLog = React.memo(function SystemLog({ text }) {
+  return (
+    <div className="flex animate-fade-in justify-center">
+      <span className="rounded-full border border-slate-800/70 bg-slate-900/60 px-4 py-1.5 text-xs font-medium text-slate-400 shadow-panel">
+        {text}
+      </span>
     </div>
   );
 });
@@ -233,6 +245,43 @@ function ChatPanel({ sessionId, initialMessages, onMessagesChange }) {
     }
   };
 
+  // --- Voice call wiring ------------------------------------------------------
+  const appendSystemMessage = useCallback((text) => {
+    setMessages((prev) => [...prev, { text, sender: 'system' }]);
+  }, []);
+
+  const handleCallStart = useCallback(() => {
+    appendSystemMessage('⚡ تم بدء مكالمة صوتية');
+  }, [appendSystemMessage]);
+
+  const handleCallEnd = useCallback(() => {
+    appendSystemMessage('🛑 تم إنهاء مكالمة صوتية');
+  }, [appendSystemMessage]);
+
+  const handleCallClose = useCallback(() => {
+    setCallOpen(false);
+    // Return focus to the composer so the user can type immediately. The modal
+    // had pulled focus; without this the textarea feels "stuck" after a call.
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, []);
+
+  // Snapshot of the visible conversation handed to the voice bot for context:
+  // user/bot turns only (no system pills, no error bubbles), last 20, mapped to
+  // the OpenAI {role, content} shape.
+  const voiceHistory = useMemo(
+    () =>
+      messages
+        .filter(
+          (m) => (m.sender === 'user' || m.sender === 'bot') && !m.isError,
+        )
+        .slice(-20)
+        .map((m) => ({
+          role: m.sender === 'user' ? 'user' : 'assistant',
+          content: m.text,
+        })),
+    [messages],
+  );
+
   const isEmpty = messages.length === 0;
 
   return (
@@ -260,9 +309,9 @@ function ChatPanel({ sessionId, initialMessages, onMessagesChange }) {
         <div className="mx-auto w-full max-w-3xl px-5 py-8 sm:px-6">
           {isEmpty ? (
             <div className="flex min-h-[55vh] animate-fade-in flex-col items-center justify-center text-center">
-              <BrandLogo className="mb-6 h-16 w-16 drop-shadow-[0_0_18px_rgba(45,212,191,0.2)]" />
+              <BrandLogo className="mb-6 h-16 w-16 animate-float drop-shadow-glow" />
               <h2 className="mb-3 text-balance text-2xl font-extrabold tracking-tight text-slate-100 sm:text-[1.75rem]">
-                كيف يمكنني مساعدتك اليوم؟
+                كيف يمكنني <span className="text-gradient">مساعدتك</span> اليوم؟
               </h2>
               <p className="max-w-md text-balance text-[0.95rem] leading-relaxed text-slate-400">
                 اسألني في الرياضيات، الفيزياء، الكيمياء، الأحياء وعلوم الأرض
@@ -291,6 +340,8 @@ function ChatPanel({ sessionId, initialMessages, onMessagesChange }) {
               {messages.map((msg, index) =>
                 msg.sender === 'user' ? (
                   <UserBubble key={index} text={msg.text} fileName={msg.fileName} />
+                ) : msg.sender === 'system' ? (
+                  <SystemLog key={index} text={msg.text} />
                 ) : (
                   <BotBubble key={index} text={msg.text} isError={msg.isError} />
                 )
@@ -341,7 +392,7 @@ function ChatPanel({ sessionId, initialMessages, onMessagesChange }) {
               disabled={loading}
               aria-label="بدء مكالمة صوتية"
               title="مكالمة صوتية مع واعي"
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-800 text-slate-400 transition-all duration-200 enabled:hover:border-accent/40 enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-accent/20 bg-accent/5 text-accent/80 transition-all duration-200 enabled:hover:border-accent/50 enabled:hover:bg-accent/10 enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
             >
               <MicIcon className="h-5 w-5" />
             </button>
@@ -362,7 +413,7 @@ function ChatPanel({ sessionId, initialMessages, onMessagesChange }) {
               onClick={handleSendMessage}
               disabled={loading || (!input.trim() && !file)}
               aria-label="إرسال"
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent text-slate-950 transition-all duration-200 enabled:hover:bg-accent-soft enabled:hover:scale-105 enabled:active:scale-95 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-600"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-accent-deep via-accent to-accent-soft text-slate-950 shadow-glow-accent transition-all duration-200 enabled:hover:brightness-110 enabled:hover:scale-105 enabled:active:scale-95 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:bg-none disabled:text-slate-600 disabled:shadow-none"
             >
               <SendIcon className="h-5 w-5" />
             </button>
@@ -373,7 +424,15 @@ function ChatPanel({ sessionId, initialMessages, onMessagesChange }) {
         </div>
       </footer>
 
-      {callOpen && <VoiceCall onClose={() => setCallOpen(false)} />}
+      {callOpen && (
+        <VoiceCall
+          sessionId={sessionId}
+          history={voiceHistory}
+          onCallStart={handleCallStart}
+          onCallEnd={handleCallEnd}
+          onClose={handleCallClose}
+        />
+      )}
     </div>
   );
 }

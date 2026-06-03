@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import BrandLogo from './BrandLogo';
+import ProfileWidget from './ProfileWidget';
 import { PlusIcon, TrashIcon, CloseIcon, ChatIcon } from './icons';
 
 function SessionRow({ session, isActive, onSelect, onDelete }) {
@@ -67,6 +68,8 @@ function Sidebar({
   onDelete,
   isOpen,
   onClose,
+  profile,
+  onEditProfile,
 }) {
   const ordered = [...sessions].sort((a, b) => b.timestamp - a.timestamp);
 
@@ -138,6 +141,9 @@ function Sidebar({
             />
           ))}
         </nav>
+
+        {/* Pinned account card */}
+        <ProfileWidget profile={profile} onEdit={onEditProfile} />
       </aside>
     </>
   );

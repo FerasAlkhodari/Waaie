@@ -52,18 +52,27 @@ async def security_headers(request: Request, call_next):
     response.headers["X-XSS-Protection"] = "1; mode=block"
     return response
 
-# Setup CORS — origins are configurable via the CORS_ORIGINS env var
-# (comma-separated). Defaults to the local React dev server.
+# Setup CORS. Origins are configurable via the CORS_ORIGINS env var
+# (comma-separated, e.g. "https://app.example.com,https://waaie.vercel.app").
+# Defaults to "*" so a Vercel / custom-domain frontend can reach this machine
+# through the Ngrok tunnel out of the box; set CORS_ORIGINS to your exact
+# deployed origin(s) in production to lock it down.
 cors_origins = [
     origin.strip()
-    for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+    for origin in os.getenv("CORS_ORIGINS", "*").split(",")
     if origin.strip()
 ]
 
+# A literal "*" cannot be combined with credentialed requests — browsers reject
+# `Access-Control-Allow-Origin: *` when credentials are sent. Waaie authenticates
+# via the X-Session-Id header (not cookies), so when the wildcard is in effect we
+# disable credentials to keep the CORS response browser-valid.
+allow_all_origins = "*" in cors_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins,
-    allow_credentials=True,
+    allow_origins=["*"] if allow_all_origins else cors_origins,
+    allow_credentials=not allow_all_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -236,8 +245,10 @@ async def voice_endpoint(websocket: WebSocket):
 
     The connection is a stream-through proxy (no disk, no buffering) with a hard
     per-call timeout and deterministic cleanup. See voice.py for the protocol.
+    The shared SessionStore lets the call recall this session's document and
+    typed chat history so the voice bot isn't amnesiac.
     """
-    await handle_voice_connection(websocket)
+    await handle_voice_connection(websocket, sessions)
 
 
 @app.get("/health")

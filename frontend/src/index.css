@@ -17,6 +17,21 @@
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
+
+  /* Branded text selection. */
+  ::selection {
+    background: rgba(45, 212, 191, 0.28);
+    color: #f0fdfa;
+  }
+
+  /* Tame autofill so it doesn't paint the premium glass inputs white. */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus {
+    -webkit-text-fill-color: #e2e8f0;
+    caret-color: #e2e8f0;
+    transition: background-color 9999s ease-in-out 0s;
+  }
 }
 
 @layer utilities {
@@ -41,5 +56,51 @@
 
   .text-balance {
     text-wrap: balance;
+  }
+
+  /* Fine film grain — layered low-opacity over backgrounds for tactile depth. */
+  .bg-noise {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* Frosted glass surface for elevated cards / modals. */
+  .glass {
+    background: linear-gradient(
+      180deg,
+      rgba(15, 23, 42, 0.74),
+      rgba(2, 6, 23, 0.78)
+    );
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    border: 1px solid rgba(148, 163, 184, 0.12);
+  }
+
+  /* Teal → cyan brand gradient, clipped to text. */
+  .text-gradient {
+    background-image: linear-gradient(
+      115deg,
+      #5eead4 0%,
+      #2dd4bf 42%,
+      #38bdf8 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Animated gradient headline (pairs with animate-shimmer). */
+  .text-shimmer {
+    background-image: linear-gradient(
+      110deg,
+      #99f6e4 0%,
+      #2dd4bf 30%,
+      #e2e8f0 50%,
+      #2dd4bf 70%,
+      #99f6e4 100%
+    );
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
   }
 }

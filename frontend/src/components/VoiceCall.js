@@ -34,7 +34,7 @@ const ERROR_HINTS = {
     'تعذّر الاتصال بخادم الصوت. تأكّد من تشغيل الخادم على المنفذ 8000.',
 };
 
-function VoiceCall({ onClose }) {
+function VoiceCall({ onClose, sessionId, history, onCallStart, onCallEnd }) {
   const [status, setStatus] = useState('connecting');
   const [elapsed, setElapsed] = useState(0);
   const [speaking, setSpeaking] = useState(false);
@@ -47,6 +47,23 @@ function VoiceCall({ onClose }) {
   // Latest status without re-subscribing the interval each tick.
   const statusRef = useRef('connecting');
   statusRef.current = status;
+
+  // Context captured at mount — the call starts immediately, so these are the
+  // session id + visible chat history at the moment the user opened the call.
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
+  const historyRef = useRef(history);
+  historyRef.current = history;
+
+  // Lifecycle callbacks via refs so the once-only mount effect always calls the
+  // latest handler without re-running. Guard flags make the chat logs fire
+  // exactly once: a start log on connect, an end log on the terminal state.
+  const onCallStartRef = useRef(onCallStart);
+  onCallStartRef.current = onCallStart;
+  const onCallEndRef = useRef(onCallEnd);
+  onCallEndRef.current = onCallEnd;
+  const startLoggedRef = useRef(false);
+  const endLoggedRef = useRef(false);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current) {
@@ -68,6 +85,12 @@ function VoiceCall({ onClose }) {
           ? prev
           : reason,
       );
+      // Log the call end into the chat exactly once — and only if it actually
+      // started (a call that never connected shouldn't emit an "ended" log).
+      if (startLoggedRef.current && !endLoggedRef.current) {
+        endLoggedRef.current = true;
+        onCallEndRef.current?.();
+      }
     },
     [clearTimer],
   );
@@ -76,6 +99,9 @@ function VoiceCall({ onClose }) {
     let cancelled = false;
 
     const client = new VoiceClient({
+      // Prime the proxy with the session id (document memory) + visible chat
+      // history (transcript) so the voice bot continues the conversation.
+      context: { sessionId: sessionIdRef.current, history: historyRef.current },
       onError: (info) => {
         if (!cancelled) setErrorInfo(info);
       },
@@ -83,6 +109,11 @@ function VoiceCall({ onClose }) {
         if (cancelled) return;
         if (s === 'connected') {
           setStatus('active');
+          // Inject the "call started" system log into the chat once.
+          if (!startLoggedRef.current) {
+            startLoggedRef.current = true;
+            onCallStartRef.current?.();
+          }
         } else if (s === 'error') {
           endCall('error');
         } else if (s === 'closed') {
@@ -152,7 +183,9 @@ function VoiceCall({ onClose }) {
       aria-modal="true"
       aria-label="مكالمة صوتية مع واعي"
     >
-      <div className="relative flex w-full max-w-sm flex-col items-center gap-6 rounded-3xl border border-slate-800/70 bg-slate-900/80 px-8 py-10 text-center shadow-panel">
+      <div className="glass relative flex w-full max-w-sm animate-pop-in flex-col items-center gap-6 overflow-hidden rounded-3xl px-8 py-10 text-center shadow-card shadow-inner-hi">
+        {/* top accent hairline */}
+        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-l from-transparent via-accent/60 to-transparent" />
         {/* Close (terminal states) */}
         {isTerminal && (
           <button
@@ -199,6 +232,26 @@ function VoiceCall({ onClose }) {
             <p className="font-mono text-sm tabular-nums text-accent">
               {formatElapsed(elapsed)}
             </p>
+          )}
+          {status === 'active' && (
+            <div
+              className="flex items-end justify-center gap-1 pt-1"
+              aria-hidden="true"
+            >
+              {[0, 1, 2, 3, 4].map((i) => (
+                <span
+                  key={i}
+                  className={`w-1 origin-bottom rounded-full bg-gradient-to-t from-accent-deep to-accent-soft transition-all duration-300 ${
+                    speaking ? 'h-5 animate-bar-dance' : 'h-1.5 opacity-40'
+                  }`}
+                  style={
+                    speaking
+                      ? { animationDelay: `${i * 0.12}s` }
+                      : undefined
+                  }
+                />
+              ))}
+            </div>
           )}
           {status === 'error' && (
             <div className="space-y-2">

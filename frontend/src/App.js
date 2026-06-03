@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
 import ChatPanel from './components/ChatPanel';
+import Onboarding from './components/Onboarding';
 import useSessions from './hooks/useSessions';
+import useProfile from './hooks/useProfile';
 
 function App() {
   const {
@@ -15,7 +17,15 @@ function App() {
     setActiveMessages,
   } = useSessions();
 
+  const { profile, saveProfile } = useProfile();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editingProfile, setEditingProfile] = useState(false);
+
+  // First-run gate: until we know who the student is, the workspace stays
+  // locked behind a full-screen welcome.
+  if (!profile) {
+    return <Onboarding onSubmit={saveProfile} />;
+  }
 
   return (
     <div
@@ -23,9 +33,11 @@ function App() {
       className="relative flex h-screen overflow-hidden bg-slate-950 text-slate-200"
     >
       {/* Ambient layered background */}
-      <div className="pointer-events-none fixed inset-0 -z-10">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_15%_-10%,rgba(45,212,191,0.07),transparent_45%),radial-gradient(circle_at_85%_110%,rgba(56,189,248,0.05),transparent_50%)]" />
+      <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+        <div className="absolute -top-1/4 right-[-10%] h-[60vh] w-[60vh] rounded-full bg-accent/8 blur-[140px] animate-aurora" />
+        <div className="absolute bottom-[-25%] left-[-10%] h-[55vh] w-[55vh] rounded-full bg-sky-500/[0.06] blur-[140px] animate-aurora-alt" />
         <div className="absolute inset-0 opacity-[0.015] [background-image:linear-gradient(to_right,#fff_1px,transparent_1px),linear-gradient(to_bottom,#fff_1px,transparent_1px)] [background-size:44px_44px]" />
+        <div className="absolute inset-0 bg-noise opacity-[0.025] mix-blend-soft-light" />
       </div>
 
       <Sidebar
@@ -36,6 +48,8 @@ function App() {
         onDelete={deleteSession}
         isOpen={drawerOpen}
         onClose={() => setDrawerOpen(false)}
+        profile={profile}
+        onEditProfile={() => setEditingProfile(true)}
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -47,6 +61,19 @@ function App() {
           onMessagesChange={setActiveMessages}
         />
       </div>
+
+      {/* Profile editor — overlays the workspace without tearing it down */}
+      {editingProfile && (
+        <Onboarding
+          initial={profile}
+          allowCancel
+          onCancel={() => setEditingProfile(false)}
+          onSubmit={(next) => {
+            saveProfile(next);
+            setEditingProfile(false);
+          }}
+        />
+      )}
     </div>
   );
 }

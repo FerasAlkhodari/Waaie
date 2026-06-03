@@ -77,3 +77,58 @@ export const SpinnerIcon = React.memo(function SpinnerIcon({ className = '' }) {
     </svg>
   );
 });
+
+export const UserIcon = React.memo(function UserIcon({ className = '' }) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
+    </svg>
+  );
+});
+
+export const MailIcon = React.memo(function MailIcon({ className = '' }) {
+  return (
+    <svg {...base} className={className}>
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <path d="M22 7l-10 6L2 7" />
+    </svg>
+  );
+});
+
+export const GearIcon = React.memo(function GearIcon({ className = '' }) {
+  return (
+    <svg {...base} className={className}>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+    </svg>
+  );
+});
+
+export const CheckIcon = React.memo(function CheckIcon({ className = '' }) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M20 6L9 17l-5-5" />
+    </svg>
+  );
+});
+
+export const SparklesIcon = React.memo(function SparklesIcon({ className = '' }) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M12 3l1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5 10.1 7.6 12 3z" />
+      <path d="M19 14l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8.8-2z" />
+    </svg>
+  );
+});
+
+// Points left — the RTL "forward / proceed" direction for primary actions.
+export const ArrowLeftIcon = React.memo(function ArrowLeftIcon({
+  className = '',
+}) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M19 12H5M11 18l-6-6 6-6" />
+    </svg>
+  );
+});

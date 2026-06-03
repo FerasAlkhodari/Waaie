@@ -17,26 +17,56 @@ import { BACKEND_URL } from './sessionApi';
 
 const SAMPLE_RATE = 24000;
 
-const wsUrl = () => {
-  const raw = (BACKEND_URL || '').trim();
+// App-level keep-alive period (ms). Browsers can't send WebSocket protocol
+// pings, so we emit a tiny client.ping frame this often; the server answers on
+// its own cadence with server.ping. Without this an idle stretch (assistant
+// silent) trips a proxy/idle read-timeout and drops the call after ~1 minute.
+const HEARTBEAT_MS = 15000;
 
-  // Production behind nginx uses a RELATIVE base ("/api"). The WebSocket
+// Swap an http(s) origin to its ws(s) equivalent: https -> wss, http -> ws.
+// This single transform is what lets the Ngrok HTTPS tunnel
+// (https://xxxx.ngrok-free.app) drive the voice socket in production with zero
+// code change — only the REACT_APP_BACKEND_URL value differs between builds.
+const toWebSocketScheme = (origin) =>
+  origin.replace(/^http(s)?:\/\//i, (_match, secure) =>
+    secure ? 'wss://' : 'ws://',
+  );
+
+// Build the absolute ws(s):// URL, appending ?session=<id> so the backend can
+// recall this session's document + chat history for context injection.
+//
+// The base is taken ENTIRELY from REACT_APP_BACKEND_URL (via BACKEND_URL): set
+// it to the Ngrok HTTPS URL in production, or http://localhost:8000 (or leave
+// it unset) in local dev. No backend host is ever hardcoded here.
+const wsUrl = (sessionId) => {
+  const raw = (BACKEND_URL || '').trim();
+  const suffix = sessionId
+    ? `?session=${encodeURIComponent(sessionId)}`
+    : '';
+
+  // Relative base (e.g. "/api" behind a reverse proxy): the WebSocket
   // constructor requires an ABSOLUTE ws(s):// URL, so resolve it against the
-  // current page origin and match the page's TLS (https -> wss).
+  // current page origin and match the page's TLS (https page -> wss socket).
   if (!/^https?:\/\//i.test(raw)) {
     const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const path = raw.replace(/\/$/, '');
-    return `${scheme}://${window.location.host}${path}/voice`;
+    return `${scheme}://${window.location.host}${path}/voice${suffix}`;
   }
 
-  // Absolute base: http -> ws, https -> wss, then drop any trailing slash.
-  let ws = raw.replace(/^http/i, 'ws').replace(/\/$/, '');
-  // Force IPv4 loopback for local dev. On Windows the browser often resolves
-  // `localhost` to IPv6 (::1) FIRST, while uvicorn listens only on IPv4
-  // (127.0.0.1); the WS handshake then dies before it opens (close code 1006).
-  // Pinning 127.0.0.1 removes that ambiguity. Non-local hosts are untouched.
-  ws = ws.replace('://localhost', '://127.0.0.1').replace('://[::1]', '://127.0.0.1');
-  return `${ws}/voice`;
+  // Absolute base (Ngrok HTTPS in prod, http://localhost in dev): convert the
+  // scheme to ws(s) and drop any trailing slash.
+  let ws = toWebSocketScheme(raw).replace(/\/$/, '');
+
+  // Local-dev only: on Windows the browser often resolves `localhost` to IPv6
+  // (::1) first while uvicorn listens on IPv4 (127.0.0.1), so the WS handshake
+  // dies before it opens (close code 1006). Pin loopback to 127.0.0.1. This
+  // rewrites ONLY localhost/[::1]; remote Ngrok / custom-domain hosts pass
+  // through untouched, so it is completely inert in production.
+  ws = ws
+    .replace('://localhost', '://127.0.0.1')
+    .replace('://[::1]', '://127.0.0.1');
+
+  return `${ws}/voice${suffix}`;
 };
 
 // --- encoding helpers ---------------------------------------------------------
@@ -80,13 +110,27 @@ function base64PCM16ToFloat32(b64) {
 }
 
 export default class VoiceClient {
-  constructor({ onEvent, onStatus, onError } = {}) {
+  constructor({ onEvent, onStatus, onError, context } = {}) {
     this.onEvent = onEvent || (() => {});
     this.onStatus = onStatus || (() => {});
     this.onError = onError || (() => {});
+    // { sessionId, history } — sessionId keys the backend's document memory;
+    // history is the visible chat handed to the proxy on open for context.
+    this.context = context || {};
 
     this.ws = null;
+    this.url = null; // resolved ws URL; reused in error messages
+    this.heartbeatTimer = null; // client.ping interval (keep-alive)
     this.wsOpened = false; // distinguishes a connect failure from a later drop
+    // Single-use lifecycle guards. `started` blocks a re-entrant start() on this
+    // same instance; `closed` is set by stop() so an in-flight start() that is
+    // still awaiting (mic / audio) aborts instead of opening a ghost socket +
+    // capture node. Critical under React StrictMode, which in dev mounts ->
+    // cleans up -> mounts again, calling start() then stop() while the first
+    // start() is mid-await (its ws/micStream not yet assigned, so that stop()
+    // can't see them to tear them down).
+    this.started = false;
+    this.closed = false;
     this.micStream = null;
     this.audioCtx = null; // one context for both capture and playback
     this.processor = null;
@@ -109,6 +153,11 @@ export default class VoiceClient {
   }
 
   async start() {
+    // Re-entrancy guard: a client is single-use. A second start() on the SAME
+    // instance is ignored (the duplicate-init lock).
+    if (this.started) return;
+    this.started = true;
+
     this.onStatus('connecting');
 
     // 1) Microphone — guard for insecure context / unsupported browser, then
@@ -136,6 +185,13 @@ export default class VoiceClient {
       throw err;
     }
 
+    // Aborted while the mic prompt was open (stop() ran during the await):
+    // release the freshly granted stream and bail before building anything.
+    if (this.closed) {
+      this.stop();
+      return;
+    }
+
     // 2) Audio graph — a single context at its NATIVE sample rate. We do NOT
     // force 24 kHz on the context (some browsers reject a strict rate and the
     // constructor throws); instead we resample mic input down to 24 kHz before
@@ -155,9 +211,20 @@ export default class VoiceClient {
       throw err;
     }
 
-    // 3) WebSocket to the backend proxy.
+    // Aborted during audio setup (the StrictMode cleanup case): do NOT open the
+    // socket. This is the load-bearing check — without it the WS opens here
+    // AFTER stop() already ran, leaving a ghost session that talks over the real
+    // one and survives hang-up.
+    if (this.closed) {
+      this.stop();
+      return;
+    }
+
+    // 3) WebSocket to the backend proxy. Resolve the URL once (with the
+    // ?session= param) so onopen/onerror all reference the same target.
+    this.url = wsUrl(this.context.sessionId);
     try {
-      this.ws = new WebSocket(wsUrl());
+      this.ws = new WebSocket(this.url);
     } catch (err) {
       this._fail(err, 'connection');
       throw err;
@@ -167,7 +234,12 @@ export default class VoiceClient {
     this.ws.onopen = () => {
       this.wsOpened = true;
       this.onStatus('connected');
+      // Hand the visible chat history to the proxy BEFORE any audio, so it gets
+      // folded into the OpenAI session.update and the bot starts aware of the
+      // typed conversation. Then begin capture and the keep-alive heartbeat.
+      this._sendContext();
       this._startCapture();
+      this._startHeartbeat();
     };
     this.ws.onmessage = (e) => this._handleServerEvent(e.data);
     this.ws.onerror = () => {
@@ -175,7 +247,7 @@ export default class VoiceClient {
       if (!this.wsOpened) {
         this._fail(
           new Error(
-            `Could not reach the voice backend at ${wsUrl()}. Is the server running?`,
+            `Could not reach the voice backend at ${this.url}. Is the server running?`,
           ),
           'connection',
         );
@@ -221,6 +293,43 @@ export default class VoiceClient {
     sink.connect(ctx.destination);
   }
 
+  // Send the one-shot context frame: the visible chat history the proxy folds
+  // into the OpenAI session. The server also supplies any uploaded-document
+  // text on its side (keyed by sessionId), so this only carries the transcript.
+  _sendContext() {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    const history = Array.isArray(this.context.history)
+      ? this.context.history
+      : [];
+    try {
+      this.ws.send(JSON.stringify({ type: 'client.context', history }));
+    } catch {
+      /* non-fatal: server falls back to its own stored history */
+    }
+  }
+
+  // App-level keep-alive. Browsers can't emit WS protocol pings, so send a tiny
+  // JSON frame the server swallows; keeps the call from being reaped as idle.
+  _startHeartbeat() {
+    this._stopHeartbeat();
+    this.heartbeatTimer = setInterval(() => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        try {
+          this.ws.send(JSON.stringify({ type: 'client.ping' }));
+        } catch {
+          /* noop — a failed ping just means the socket is gone */
+        }
+      }
+    }, HEARTBEAT_MS);
+  }
+
+  _stopHeartbeat() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
+
   _handleServerEvent(raw) {
     if (typeof raw !== 'string') return; // proxy sends JSON text frames
     let event;
@@ -229,6 +338,10 @@ export default class VoiceClient {
     } catch {
       return;
     }
+
+    // Proxy keep-alive heartbeat — swallow it; it's not an OpenAI event and
+    // must never reach the UI.
+    if (event.type === 'server.ping') return;
 
     switch (event.type) {
       // GA Realtime streams assistant audio as response.output_audio.delta
@@ -283,6 +396,11 @@ export default class VoiceClient {
   // Idempotent teardown: stop mic, tear down audio graph, close the socket,
   // and null every reference so nothing keeps the audio hardware alive.
   stop() {
+    // Mark closed FIRST so an in-flight start() awaiting mic/audio sees it and
+    // aborts, instead of resurrecting the socket/capture node after teardown.
+    this.closed = true;
+    this._stopHeartbeat();
+
     if (this.processor) {
       this.processor.onaudioprocess = null;
       try {
