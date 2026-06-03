@@ -3,7 +3,15 @@ import uuid
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import (
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+    WebSocket,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -13,6 +21,7 @@ from slowapi.util import get_remote_address
 from documents import SUPPORTED_EXTENSIONS, DocumentParseError, extract_text
 from model import DeepSeekMentor
 from session import SessionStore
+from voice import handle_voice_connection
 
 load_dotenv()
 
@@ -219,6 +228,16 @@ async def ask_not_allowed():
             "containing your question."
         ),
     )
+
+
+@app.websocket("/voice")
+async def voice_endpoint(websocket: WebSocket):
+    """Live, bi-directional voice call bridged to OpenAI's Realtime API.
+
+    The connection is a stream-through proxy (no disk, no buffering) with a hard
+    per-call timeout and deterministic cleanup. See voice.py for the protocol.
+    """
+    await handle_voice_connection(websocket)
 
 
 @app.get("/health")

@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import MarkdownMessage from './MarkdownMessage';
 import BrandLogo from './BrandLogo';
+import VoiceCall from './VoiceCall';
+import { MicIcon } from './icons';
 import { askQuestion, askDocument } from '../lib/sessionApi';
 
 const ACCEPTED_TYPES = '.pdf,.docx,.xlsx';
@@ -114,6 +116,7 @@ function ChatPanel({ sessionId, initialMessages, onMessagesChange }) {
   const [loading, setLoading] = useState(false);
   const [file, setFile] = useState(null);
   const [dragActive, setDragActive] = useState(false);
+  const [callOpen, setCallOpen] = useState(false);
   const scrollRef = useRef(null);
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -333,6 +336,15 @@ function ChatPanel({ sessionId, initialMessages, onMessagesChange }) {
             >
               <AttachIcon className="h-5 w-5" />
             </button>
+            <button
+              onClick={() => setCallOpen(true)}
+              disabled={loading}
+              aria-label="بدء مكالمة صوتية"
+              title="مكالمة صوتية مع واعي"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-800 text-slate-400 transition-all duration-200 enabled:hover:border-accent/40 enabled:hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <MicIcon className="h-5 w-5" />
+            </button>
             <textarea
               ref={textareaRef}
               rows={1}
@@ -360,6 +372,8 @@ function ChatPanel({ sessionId, initialMessages, onMessagesChange }) {
           </p>
         </div>
       </footer>
+
+      {callOpen && <VoiceCall onClose={() => setCallOpen(false)} />}
     </div>
   );
 }

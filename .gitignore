@@ -7,6 +7,9 @@ venv/
 .coverage
 htmlcov/
 
+# Local scratch / dev server logs (e.g. _server8000.log)
+_*.log
+
 # Environment — NEVER commit real secrets (DEEPSEEK_API_KEY lives here)
 .env
 .env.*
