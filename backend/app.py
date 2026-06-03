@@ -52,21 +52,29 @@ async def security_headers(request: Request, call_next):
     response.headers["X-XSS-Protection"] = "1; mode=block"
     return response
 
-# Setup CORS. Origins are configurable via the CORS_ORIGINS env var
-# (comma-separated, e.g. "https://app.example.com,https://waaie.vercel.app").
-# Defaults to "*" so a Vercel / custom-domain frontend can reach this machine
-# through the Ngrok tunnel out of the box; set CORS_ORIGINS to your exact
-# deployed origin(s) in production to lock it down.
-cors_origins = [
-    origin.strip()
-    for origin in os.getenv("CORS_ORIGINS", "*").split(",")
-    if origin.strip()
+# Setup CORS. The deployed frontend origins are baked in so the API works the
+# moment it's reached through the Ngrok tunnel, and any extra origins from the
+# CORS_ORIGINS env var (comma-separated) are merged on top. Merging — rather
+# than replacing — means the production domain stays allowed even if a local
+# .env still pins CORS_ORIGINS to localhost.
+DEFAULT_CORS_ORIGINS = [
+    "https://waaie.feraswe.com",  # production frontend (Vercel + custom domain)
+    "http://localhost:3000",  # local React dev server
+    "http://127.0.0.1:3000",
 ]
 
+_extra_origins = [
+    origin.strip()
+    for origin in os.getenv("CORS_ORIGINS", "").split(",")
+    if origin.strip()
+]
+# De-duplicated, order-stable union of the baked-in defaults and any env origins.
+cors_origins = list(dict.fromkeys(DEFAULT_CORS_ORIGINS + _extra_origins))
+
 # A literal "*" cannot be combined with credentialed requests — browsers reject
-# `Access-Control-Allow-Origin: *` when credentials are sent. Waaie authenticates
-# via the X-Session-Id header (not cookies), so when the wildcard is in effect we
-# disable credentials to keep the CORS response browser-valid.
+# `Access-Control-Allow-Origin: *` when credentials are sent. With an explicit
+# allow-list we keep allow_credentials=True; only if CORS_ORIGINS is set to "*"
+# do we drop credentials to keep the response browser-valid.
 allow_all_origins = "*" in cors_origins
 
 app.add_middleware(
