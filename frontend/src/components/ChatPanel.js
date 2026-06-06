@@ -3,15 +3,16 @@ import MarkdownMessage from './MarkdownMessage';
 import BrandLogo from './BrandLogo';
 import VoiceCall from './VoiceCall';
 import { MicIcon } from './icons';
-import { askQuestion, askDocument } from '../lib/sessionApi';
+import { askQuestionStream, askDocumentStream } from '../lib/sessionApi';
+import { FRIENDLY_ERROR } from '../lib/constants';
 
 const ACCEPTED_TYPES = '.pdf,.docx,.xlsx';
 const ACCEPTED_EXTENSIONS = ['.pdf', '.docx', '.xlsx'];
 
-// Single, friendly, motivational fallback shown for ANY backend/network
-// failure — students never see raw status codes, JSON, or stack traces.
-const FRIENDLY_ERROR =
-  'يبدو أنني لم أفهمك جيداً بسبب الضغط العالي، يرجى إعادة إرسال سؤالك مرة أخرى لأختبرك فيه!';
+// Distance (px) from the bottom within which we still consider the user "at the
+// bottom" and keep auto-scrolling. Scrolling further up than this freezes the
+// auto-follow so streamed tokens don't snap the view back down.
+const SCROLL_STICK_THRESHOLD_PX = 80;
 
 const isAcceptedFile = (file) =>
   !!file &&
@@ -84,7 +85,7 @@ const UserBubble = React.memo(function UserBubble({ text, fileName }) {
   );
 });
 
-const BotBubble = React.memo(function BotBubble({ text, isError }) {
+const BotBubble = React.memo(function BotBubble({ text, isError, streaming }) {
   return (
     <div className="animate-fade-in-up">
       <div className="mb-2 flex items-center gap-2.5">
@@ -103,7 +104,14 @@ const BotBubble = React.memo(function BotBubble({ text, isError }) {
         {isError ? (
           <p className="text-[0.95rem] leading-relaxed text-slate-300">{text}</p>
         ) : (
-          <MarkdownMessage content={text} />
+          <>
+            <MarkdownMessage content={text} />
+            {streaming && (
+              // Blinking caret while tokens are still arriving — removed the
+              // instant the answer settles into a normal bot message.
+              <span className="ml-0.5 inline-block h-[1.05em] w-[2px] translate-y-[0.15em] animate-pulse rounded-full bg-accent align-text-bottom" />
+            )}
+          </>
         )}
       </div>
     </div>
@@ -132,6 +140,22 @@ function ChatPanel({ sessionId, initialMessages, onMessagesChange }) {
   const scrollRef = useRef(null);
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
+  // Pending requestAnimationFrame id for batching streamed token updates into
+  // one paint per frame (see handleSendMessage).
+  const rafRef = useRef(null);
+  // Whether the conversation is pinned to the bottom. Flips to false as soon as
+  // the user scrolls up to re-read, so incoming tokens don't snap them back.
+  const stickToBottomRef = useRef(true);
+
+  // Cancel any in-flight token-flush frame if the panel unmounts mid-stream
+  // (e.g. switching sessions) so we never call setState on a gone component.
+  useEffect(() => {
+    return () => {
+      if (rafRef.current != null) {
+        cancelAnimationFrame(rafRef.current);
+      }
+    };
+  }, []);
 
   // Persist message changes up to the session store, but skip the initial
   // mount so merely opening a session doesn't rewrite its recency/title.
@@ -143,6 +167,11 @@ function ChatPanel({ sessionId, initialMessages, onMessagesChange }) {
       firstRender.current = false;
       return;
     }
+    // Skip intermediate streaming frames — persist once the live bubble settles
+    // (streaming flag cleared) so we write localStorage once per answer, not
+    // once per token.
+    const last = messages[messages.length - 1];
+    if (last && last.streaming) return;
     onChangeRef.current(messages);
   }, [messages]);
 
@@ -151,11 +180,25 @@ function ChatPanel({ sessionId, initialMessages, onMessagesChange }) {
     textareaRef.current?.focus();
   }, []);
 
+  // Update the "pinned to bottom" flag whenever the user scrolls. Once they
+  // scroll further than the threshold above the bottom, auto-follow pauses.
+  const handleChatScroll = useCallback((e) => {
+    const el = e.currentTarget;
+    stickToBottomRef.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight <
+      SCROLL_STICK_THRESHOLD_PX;
+  }, []);
+
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) {
-      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
-    }
+    // Smart auto-scroll: only follow new content while the user is still pinned
+    // to the bottom. If they've scrolled up to read, leave their view alone.
+    if (!el || !stickToBottomRef.current) return;
+    // Instant follow while streaming (smooth scroll restarts every frame and
+    // would never catch up); smooth elsewhere.
+    const last = messages[messages.length - 1];
+    const behavior = last && last.streaming ? 'auto' : 'smooth';
+    el.scrollTo({ top: el.scrollHeight, behavior });
   }, [messages, loading]);
 
   const autoGrow = (el) => {
@@ -182,6 +225,9 @@ function ChatPanel({ sessionId, initialMessages, onMessagesChange }) {
     const userText =
       question || (attached ? `سؤال حول المستند: ${attached.name}` : '');
 
+    // Sending your own message always snaps you to the bottom, regardless of
+    // where you'd scrolled — then the smart auto-scroll follows the response.
+    stickToBottomRef.current = true;
     setMessages((prev) => [
       ...prev,
       { text: userText, sender: 'user', fileName: attached?.name },
@@ -193,22 +239,88 @@ function ChatPanel({ sessionId, initialMessages, onMessagesChange }) {
     }
     setLoading(true);
 
+    // --- Token streaming ------------------------------------------------------
+    // `acc` accumulates raw tokens. The live bot bubble is appended lazily on
+    // the FIRST token, so the 3-dot typing indicator stays up until text truly
+    // begins (loading) and then hands off seamlessly to the streaming bubble.
+    // Token updates are coalesced to one paint per animation frame to keep
+    // markdown re-rendering smooth even on long answers.
+    let started = false;
+    let acc = '';
+
+    const flush = () => {
+      rafRef.current = null;
+      setMessages((prev) => {
+        if (!prev.length) return prev;
+        const last = prev[prev.length - 1];
+        if (!last || !last.streaming) return prev;
+        const next = prev.slice();
+        next[next.length - 1] = { ...last, text: acc };
+        return next;
+      });
+    };
+    const scheduleFlush = () => {
+      if (rafRef.current == null) {
+        rafRef.current = requestAnimationFrame(flush);
+      }
+    };
+    const cancelFlush = () => {
+      if (rafRef.current != null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+
+    const onDelta = (chunk) => {
+      if (!chunk) return;
+      acc += chunk;
+      if (!started) {
+        started = true;
+        // First token arrived: retire the typing indicator and open the live
+        // bubble that the subsequent deltas stream into.
+        setLoading(false);
+        setMessages((prev) => [
+          ...prev,
+          { text: '', sender: 'bot', streaming: true },
+        ]);
+      }
+      scheduleFlush();
+    };
+
     try {
-      const data = attached
-        ? await askDocument({ file: attached, question, sessionId })
-        : await askQuestion({ question, sessionId });
-      const answer =
-        data?.data?.answer ||
-        data?.message ||
-        'لم أتمكن من العثور على إجابة.';
-      setMessages((prev) => [...prev, { text: answer, sender: 'bot' }]);
+      if (attached) {
+        await askDocumentStream({ file: attached, question, sessionId, onDelta });
+      } else {
+        await askQuestionStream({ question, sessionId, onDelta });
+      }
+
+      // Stream finished cleanly: commit the full text and clear the streaming
+      // flag so the bubble settles into a normal (persisted) bot message.
+      cancelFlush();
+      const finalText = acc.trim() || 'لم أتمكن من العثور على إجابة.';
+      setMessages((prev) => {
+        const next = prev.slice();
+        const last = next[next.length - 1];
+        if (last && last.streaming) {
+          next[next.length - 1] = { text: finalText, sender: 'bot' };
+        } else {
+          next.push({ text: finalText, sender: 'bot' });
+        }
+        return next;
+      });
     } catch (error) {
-      // Absolute zero raw error leakage: any status code (429/500/timeout/
-      // network) collapses to one friendly, motivational Arabic message.
-      setMessages((prev) => [
-        ...prev,
-        { text: FRIENDLY_ERROR, sender: 'bot', isError: true },
-      ]);
+      // Absolute zero raw error leakage. Whether the stream failed to initialize
+      // or broke midway, discard any partial bubble and show the one friendly,
+      // motivational Arabic recovery notice — never a status code or stack.
+      cancelFlush();
+      setMessages((prev) => {
+        const next =
+          prev.length && prev[prev.length - 1].streaming
+            ? prev.slice(0, -1)
+            : prev.slice();
+        next.push({ text: FRIENDLY_ERROR, sender: 'bot', isError: true });
+        return next;
+      });
     } finally {
       setLoading(false);
     }
@@ -258,6 +370,25 @@ function ChatPanel({ sessionId, initialMessages, onMessagesChange }) {
     appendSystemMessage('🛑 تم إنهاء مكالمة صوتية');
   }, [appendSystemMessage]);
 
+  // Merge a finished voice call's dialogue into the persistent chat. Each turn
+  // becomes a user bubble (the transcribed question) followed by a bot bubble
+  // (the model's fully streamed spoken answer), appended in order so the voice
+  // exchange lives alongside the typed conversation and is saved to
+  // localStorage by the normal messages effect.
+  const handleVoiceTurns = useCallback((turns) => {
+    if (!Array.isArray(turns) || turns.length === 0) return;
+    setMessages((prev) => {
+      const additions = [];
+      turns.forEach((turn) => {
+        const userText = (turn?.user || '').trim();
+        const assistantText = (turn?.assistant || '').trim();
+        if (userText) additions.push({ text: userText, sender: 'user' });
+        if (assistantText) additions.push({ text: assistantText, sender: 'bot' });
+      });
+      return additions.length ? [...prev, ...additions] : prev;
+    });
+  }, []);
+
   const handleCallClose = useCallback(() => {
     setCallOpen(false);
     // Return focus to the composer so the user can type immediately. The modal
@@ -305,7 +436,11 @@ function ChatPanel({ sessionId, initialMessages, onMessagesChange }) {
       )}
 
       {/* Conversation */}
-      <main ref={scrollRef} className="scrollbar-elegant flex-1 overflow-y-auto">
+      <main
+        ref={scrollRef}
+        onScroll={handleChatScroll}
+        className="scrollbar-elegant flex-1 overflow-y-auto"
+      >
         <div className="mx-auto w-full max-w-3xl px-5 py-8 sm:px-6">
           {isEmpty ? (
             <div className="flex min-h-[55vh] animate-fade-in flex-col items-center justify-center text-center">
@@ -343,7 +478,12 @@ function ChatPanel({ sessionId, initialMessages, onMessagesChange }) {
                 ) : msg.sender === 'system' ? (
                   <SystemLog key={index} text={msg.text} />
                 ) : (
-                  <BotBubble key={index} text={msg.text} isError={msg.isError} />
+                  <BotBubble
+                    key={index}
+                    text={msg.text}
+                    isError={msg.isError}
+                    streaming={msg.streaming}
+                  />
                 )
               )}
               {loading && <TypingIndicator />}
@@ -430,6 +570,7 @@ function ChatPanel({ sessionId, initialMessages, onMessagesChange }) {
           history={voiceHistory}
           onCallStart={handleCallStart}
           onCallEnd={handleCallEnd}
+          onVoiceTurns={handleVoiceTurns}
           onClose={handleCallClose}
         />
       )}

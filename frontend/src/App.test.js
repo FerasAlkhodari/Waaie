@@ -19,11 +19,26 @@ function ask(question) {
   fireEvent.click(screen.getByRole('button', { name: 'إرسال' }));
 }
 
-afterEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  // App gates the workspace behind onboarding until a profile exists, so seed
+  // one to land these chat-flow tests directly on the composer (a returning
+  // student). Without this, render(<App />) shows the onboarding screen.
+  window.localStorage.setItem(
+    'waaie_profile_v1',
+    JSON.stringify({ name: 'Test Student', email: 'test@example.com' }),
+  );
+});
+
+afterEach(() => {
+  jest.clearAllMocks();
+  window.localStorage.clear();
+});
 
 test('renders the empty-state hero and composer', () => {
   render(<App />);
-  expect(screen.getByText('كيف يمكنني مساعدتك اليوم؟')).toBeInTheDocument();
+  expect(
+    screen.getByRole('heading', { name: 'كيف يمكنني مساعدتك اليوم؟' })
+  ).toBeInTheDocument();
   expect(screen.getByPlaceholderText(PLACEHOLDER)).toBeInTheDocument();
 });
 

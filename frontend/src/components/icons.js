@@ -132,3 +132,130 @@ export const ArrowLeftIcon = React.memo(function ArrowLeftIcon({
     </svg>
   );
 });
+
+// Stacked layers — the "Question Bank" (بنك الأسئلة) affordance.
+export const BankIcon = React.memo(function BankIcon({ className = '' }) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M12 2L2 7l10 5 10-5-10-5z" />
+      <path d="M2 17l10 5 10-5" />
+      <path d="M2 12l10 5 10-5" />
+    </svg>
+  );
+});
+
+// Medal — crowns the final score screen.
+export const AwardIcon = React.memo(function AwardIcon({ className = '' }) {
+  return (
+    <svg {...base} className={className}>
+      <circle cx="12" cy="8" r="6" />
+      <path d="M8.21 13.89L7 23l5-3 5 3-1.21-9.11" />
+    </svg>
+  );
+});
+
+// Circular arrow — "retry / restart the quiz".
+export const RotateIcon = React.memo(function RotateIcon({ className = '' }) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M3 12a9 9 0 109-9 9 9 0 00-6.36 2.64L3 8" />
+      <path d="M3 3v5h5" />
+    </svg>
+  );
+});
+
+// Lightbulb — heads the "نقاط التطوير" insights in the post-quiz review.
+export const LightbulbIcon = React.memo(function LightbulbIcon({
+  className = '',
+}) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M9 18h6M10 22h4M12 2a7 7 0 00-4 12.7c.6.5 1 1.3 1 2.1v.2h6v-.2c0-.8.4-1.6 1-2.1A7 7 0 0012 2z" />
+    </svg>
+  );
+});
+
+// 2×2 tile grid — the "Waaie Ecosystem" launcher (a constellation of sister apps).
+export const GridIcon = React.memo(function GridIcon({ className = '' }) {
+  return (
+    <svg {...base} className={className}>
+      <rect x="3" y="3" width="7" height="7" rx="1.5" />
+      <rect x="14" y="3" width="7" height="7" rx="1.5" />
+      <rect x="3" y="14" width="7" height="7" rx="1.5" />
+      <rect x="14" y="14" width="7" height="7" rx="1.5" />
+    </svg>
+  );
+});
+
+// Box with an out-arrow — "opens an external site in a new tab".
+export const ExternalLinkIcon = React.memo(function ExternalLinkIcon({
+  className = '',
+}) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M15 3h6v6M10 14L21 3" />
+      <path d="M21 14v5a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h5" />
+    </svg>
+  );
+});
+
+// Shield + check — CyberGuard (digital protection).
+export const ShieldIcon = React.memo(function ShieldIcon({ className = '' }) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+      <path d="M9 12l2 2 4-4" />
+    </svg>
+  );
+});
+
+// Angle brackets — BITBOT (programming).
+export const CodeIcon = React.memo(function CodeIcon({ className = '' }) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M16 18l6-6-6-6M8 6l-6 6 6 6M13.5 4l-3 16" />
+    </svg>
+  );
+});
+
+// Compass — Nibras (a guiding light through exam prep).
+export const CompassIcon = React.memo(function CompassIcon({ className = '' }) {
+  return (
+    <svg {...base} className={className}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M16.24 7.76l-2.83 6.36-6.36 2.83 2.83-6.36 6.36-2.83z" />
+    </svg>
+  );
+});
+
+// Landmark / monument — Vision 2030 (national mega-projects).
+export const LandmarkIcon = React.memo(function LandmarkIcon({
+  className = '',
+}) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M3 21h18M5 21V10l7-4 7 4v11M9 21v-5h6v5M9 12h.01M15 12h.01" />
+    </svg>
+  );
+});
+
+// Concentric target — Qudra (aptitude / precision).
+export const TargetIcon = React.memo(function TargetIcon({ className = '' }) {
+  return (
+    <svg {...base} className={className}>
+      <circle cx="12" cy="12" r="10" />
+      <circle cx="12" cy="12" r="6" />
+      <circle cx="12" cy="12" r="2" />
+    </svg>
+  );
+});
+
+// Balance scale — the AI Legal Advisor (justice).
+export const ScaleIcon = React.memo(function ScaleIcon({ className = '' }) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M12 3v18M8 21h8M5 7h14" />
+      <path d="M5 7l-3 7h6l-3-7zM19 7l-3 7h6l-3-7z" />
+    </svg>
+  );
+});

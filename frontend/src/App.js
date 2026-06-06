@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
 import ChatPanel from './components/ChatPanel';
+import QuizPanel from './components/QuizPanel';
 import Onboarding from './components/Onboarding';
+import EcosystemHub from './components/EcosystemHub';
 import useSessions from './hooks/useSessions';
 import useProfile from './hooks/useProfile';
 
@@ -20,6 +22,20 @@ function App() {
   const { profile, saveProfile } = useProfile();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
+  // Whether the Ecosystem hub (sister AI platforms) is open over the workspace.
+  const [ecosystemOpen, setEcosystemOpen] = useState(false);
+  // Which workspace is showing: the chat or the Question Bank (بنك الأسئلة).
+  const [view, setView] = useState('chat');
+
+  // Opening a chat (new or existing) always returns to the chat workspace.
+  const handleNewChat = () => {
+    setView('chat');
+    createSession();
+  };
+  const handleSelectChat = (id) => {
+    setView('chat');
+    switchSession(id);
+  };
 
   // First-run gate: until we know who the student is, the workspace stays
   // locked behind a full-screen welcome.
@@ -43,8 +59,11 @@ function App() {
       <Sidebar
         sessions={sessions}
         activeSessionId={activeSessionId}
-        onNew={createSession}
-        onSelect={switchSession}
+        activeView={view}
+        onNew={handleNewChat}
+        onSelect={handleSelectChat}
+        onOpenQuiz={() => setView('quiz')}
+        onOpenEcosystem={() => setEcosystemOpen(true)}
         onDelete={deleteSession}
         isOpen={drawerOpen}
         onClose={() => setDrawerOpen(false)}
@@ -54,12 +73,16 @@ function App() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <Navbar onMenuClick={() => setDrawerOpen(true)} />
-        <ChatPanel
-          key={activeSessionId}
-          sessionId={activeSessionId}
-          initialMessages={activeSession?.messages || []}
-          onMessagesChange={setActiveMessages}
-        />
+        {view === 'quiz' ? (
+          <QuizPanel profile={profile} />
+        ) : (
+          <ChatPanel
+            key={activeSessionId}
+            sessionId={activeSessionId}
+            initialMessages={activeSession?.messages || []}
+            onMessagesChange={setActiveMessages}
+          />
+        )}
       </div>
 
       {/* Profile editor — overlays the workspace without tearing it down */}
@@ -73,6 +96,13 @@ function App() {
             setEditingProfile(false);
           }}
         />
+      )}
+
+      {/* Ecosystem hub — sister AI platforms. Rendered at the app root (not
+          inside the transformed sidebar) so its fixed overlay covers the
+          viewport correctly. */}
+      {ecosystemOpen && (
+        <EcosystemHub onClose={() => setEcosystemOpen(false)} />
       )}
     </div>
   );

@@ -1,6 +1,6 @@
 import os
 import re
-from typing import Dict, List, Optional
+from typing import Dict, Iterator, List, Optional
 
 from openai import OpenAI
 
@@ -155,8 +155,9 @@ class DeepSeekMentor:
 
     The API key is read exclusively from the environment so it never has to
     live in source. Construction fails fast if the key is missing. Each call is
-    a single, stateless chat completion (no history, no retries) to keep token
-    spend predictable on the prepaid balance.
+    a single chat completion with no retries, to keep token spend predictable
+    on the prepaid balance; recent turns, when supplied, are passed in by the
+    caller via ``history``.
     """
 
     def __init__(
@@ -179,33 +180,89 @@ class DeepSeekMentor:
         question: str,
         context: Optional[str] = None,
         history: Optional[List[Dict[str, str]]] = None,
+        max_tokens: Optional[int] = None,
     ) -> Dict[str, str]:
         if not question or not question.strip():
             raise ValueError("Question cannot be empty")
 
         language = detect_language(question)
-        user_content = _build_contents(question, context)
+        messages = self._assemble_messages(question, context, history)
 
-        # Message order: system prompt -> recent conversation turns (memory)
-        # -> the current question/document. ``history`` is the caller-managed,
-        # already-trimmed list of prior {role, content} turns, so the model has
-        # short-term memory while the SYSTEM_INSTRUCTION guardrails still apply.
-        messages: List[Dict[str, str]] = [
-            {"role": "system", "content": SYSTEM_INSTRUCTION}
-        ]
-        if history:
-            messages.extend(history)
-        messages.append({"role": "user", "content": user_content})
+        create_kwargs: Dict[str, object] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.3,
+            "stream": False,
+        }
+        # Bulk callers (e.g. the quiz batch generator) need output headroom
+        # beyond the model's modest default cap so a large minified JSON array
+        # is not truncated mid-object. When unset, the request is byte-for-byte
+        # identical to before — the guardrails and default behaviour are
+        # completely unchanged.
+        if max_tokens is not None:
+            create_kwargs["max_tokens"] = int(max_tokens)
 
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            temperature=0.3,
-            stream=False,
-        )
+        response = self.client.chat.completions.create(**create_kwargs)
 
         answer = (response.choices[0].message.content or "").strip()
         if not answer:
             raise RuntimeError("DeepSeek returned an empty response")
 
         return {"answer": answer, "language": language}
+
+    def stream_answer(
+        self,
+        question: str,
+        context: Optional[str] = None,
+        history: Optional[List[Dict[str, str]]] = None,
+    ) -> Iterator[str]:
+        """Yield the answer as a sequence of text deltas as DeepSeek produces
+        them (token streaming), instead of blocking for the whole completion.
+
+        Mirrors ``get_answer``'s message assembly and guardrails exactly — only
+        the transport differs (``stream=True``). The caller accumulates the
+        deltas, records the turn, and decides what an all-empty stream means.
+        """
+        if not question or not question.strip():
+            raise ValueError("Question cannot be empty")
+
+        messages = self._assemble_messages(question, context, history)
+
+        stream = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=0.3,
+            stream=True,
+        )
+
+        for chunk in stream:
+            choices = getattr(chunk, "choices", None)
+            if not choices:
+                continue
+            delta = getattr(choices[0], "delta", None)
+            content = getattr(delta, "content", None) if delta else None
+            if content:
+                yield content
+
+    def _assemble_messages(
+        self,
+        question: str,
+        context: Optional[str],
+        history: Optional[List[Dict[str, str]]],
+    ) -> List[Dict[str, str]]:
+        """Build the system + history + current-turn message list shared by the
+        blocking and streaming code paths.
+
+        Message order: system prompt -> recent conversation turns (memory) ->
+        the current question/document. ``history`` is the caller-managed,
+        already-trimmed list of prior {role, content} turns, so the model has
+        short-term memory while the SYSTEM_INSTRUCTION guardrails still apply.
+        """
+        user_content = _build_contents(question, context)
+        messages: List[Dict[str, str]] = [
+            {"role": "system", "content": SYSTEM_INSTRUCTION}
+        ]
+        if history:
+            messages.extend(history)
+        messages.append({"role": "user", "content": user_content})
+        return messages

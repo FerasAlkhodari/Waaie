@@ -5,8 +5,18 @@ python-dotenv>=1.0.0
 slowapi>=0.1.9
 python-multipart>=0.0.6
 websockets>=12.0
-pypdf>=4.0.0
+# pdfplumber (MIT, on pdfminer.six) replaces pypdf: it exposes char/word-level
+# bounding boxes, which the positional, page-aware, RTL/multi-column reader in
+# documents.py needs. We deliberately avoid PyMuPDF/fitz (AGPL-3.0) — see the
+# licensing note in documents.py.
+pdfplumber>=0.11.0
 python-docx>=1.1.0
 openpyxl>=3.1.0
 pytest>=7.3.0
 httpx>=0.24.0
+# Test-fixture toolchain (offline, deterministic PDF generation):
+# reportlab (BSD) renders fixtures; arabic-reshaper + python-bidi shape Arabic
+# for the RTL fixtures, rendered with the vendored OFL Amiri font.
+reportlab>=4.0.0
+arabic-reshaper>=3.0.0
+python-bidi>=0.4.2

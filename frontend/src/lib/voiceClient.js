@@ -23,6 +23,21 @@ const SAMPLE_RATE = 24000;
 // silent) trips a proxy/idle read-timeout and drops the call after ~1 minute.
 const HEARTBEAT_MS = 15000;
 
+// Safety net against an indefinite "connecting" hang. Once the mic is granted,
+// the socket should open in well under a second; if `onopen` hasn't fired
+// within this window we give up and route to the friendly error notice instead
+// of spinning forever. Generous so a momentarily slow network never trips it.
+const CONNECT_TIMEOUT_MS = 12000;
+
+// Flip to true to trace the voice handshake in the browser console.
+const VOICE_DEBUG =
+  typeof process !== 'undefined' &&
+  process.env &&
+  process.env.REACT_APP_VOICE_DEBUG === 'true';
+const vlog = (...args) => {
+  if (VOICE_DEBUG) console.debug('[voice]', ...args);
+};
+
 // Swap an http(s) origin to its ws(s) equivalent: https -> wss, http -> ws.
 // This single transform is what lets the Ngrok HTTPS tunnel
 // (https://xxxx.ngrok-free.app) drive the voice socket in production with zero
@@ -121,6 +136,7 @@ export default class VoiceClient {
     this.ws = null;
     this.url = null; // resolved ws URL; reused in error messages
     this.heartbeatTimer = null; // client.ping interval (keep-alive)
+    this.connectTimer = null; // watchdog: aborts an indefinite "connecting" hang
     this.wsOpened = false; // distinguishes a connect failure from a later drop
     // Single-use lifecycle guards. `started` blocks a re-entrant start() on this
     // same instance; `closed` is set by stop() so an in-flight start() that is
@@ -138,6 +154,10 @@ export default class VoiceClient {
 
     this.playHead = 0; // next scheduled start time (seconds, audioCtx clock)
     this.scheduled = new Set(); // live AudioBufferSourceNodes, for barge-in flush
+    // audioCtx clock time at which the CURRENT spoken utterance's playback
+    // begins. Null between utterances. Lets the UI pace the transcript reveal to
+    // how much audio has actually been heard (see getPlaybackClock).
+    this.audioStartedAt = null;
   }
 
   // Normalize and surface a failure: log the real error, report it with a phase
@@ -179,6 +199,7 @@ export default class VoiceClient {
           noiseSuppression: true,
         },
       });
+      vlog('mic granted');
     } catch (err) {
       // NotAllowedError, NotFoundError, NotReadableError, etc.
       this._fail(err, 'mic');
@@ -192,6 +213,11 @@ export default class VoiceClient {
       return;
     }
 
+    // Mic is in hand; from here opening the socket should be near-instant. Arm
+    // the watchdog so a stall in audio/WS setup can't leave the UI spinning on
+    // "connecting" forever — it fails cleanly into the friendly notice instead.
+    this._armConnectWatchdog();
+
     // 2) Audio graph — a single context at its NATIVE sample rate. We do NOT
     // force 24 kHz on the context (some browsers reject a strict rate and the
     // constructor throws); instead we resample mic input down to 24 kHz before
@@ -201,10 +227,14 @@ export default class VoiceClient {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (!Ctx) throw new Error('Web Audio API is not supported.');
       this.audioCtx = new Ctx();
-      // Created inside the click gesture, but resume() anyway in case the
-      // browser starts it suspended.
+      // Resume WITHOUT awaiting. This effect runs after render, outside the
+      // click's user-gesture window, so a suspended context's resume() can stay
+      // PENDING indefinitely — and awaiting it here previously stalled the whole
+      // call on "connecting", never reaching the WebSocket. Fire-and-forget: the
+      // context resumes on its own (and again when the first audio chunk plays),
+      // so the socket opens immediately and the UI transitions right away.
       if (this.audioCtx.state === 'suspended') {
-        await this.audioCtx.resume();
+        this.audioCtx.resume().catch(() => {});
       }
     } catch (err) {
       this._fail(err, 'audio');
@@ -223,6 +253,7 @@ export default class VoiceClient {
     // 3) WebSocket to the backend proxy. Resolve the URL once (with the
     // ?session= param) so onopen/onerror all reference the same target.
     this.url = wsUrl(this.context.sessionId);
+    vlog('opening socket', this.url);
     try {
       this.ws = new WebSocket(this.url);
     } catch (err) {
@@ -232,7 +263,9 @@ export default class VoiceClient {
     this.ws.binaryType = 'arraybuffer';
 
     this.ws.onopen = () => {
+      this._clearConnectWatchdog();
       this.wsOpened = true;
+      vlog('socket OPEN -> connected');
       this.onStatus('connected');
       // Hand the visible chat history to the proxy BEFORE any audio, so it gets
       // folded into the OpenAI session.update and the bot starts aware of the
@@ -243,8 +276,10 @@ export default class VoiceClient {
     };
     this.ws.onmessage = (e) => this._handleServerEvent(e.data);
     this.ws.onerror = () => {
+      vlog('socket ERROR (wsOpened=' + this.wsOpened + ')');
       // The error event carries no detail (browser security); infer from state.
       if (!this.wsOpened) {
+        this._clearConnectWatchdog();
         this._fail(
           new Error(
             `Could not reach the voice backend at ${this.url}. Is the server running?`,
@@ -254,6 +289,8 @@ export default class VoiceClient {
       }
     };
     this.ws.onclose = (e) => {
+      vlog('socket CLOSE code=' + e.code + ' wsOpened=' + this.wsOpened);
+      this._clearConnectWatchdog();
       // A close before open is a connection failure, not a normal hang-up.
       if (!this.wsOpened) {
         this._fail(
@@ -330,6 +367,35 @@ export default class VoiceClient {
     }
   }
 
+  // Watchdog for the "connecting" phase: if the socket hasn't reached onopen
+  // within CONNECT_TIMEOUT_MS, abort instead of hanging forever. Surfaces as a
+  // 'connection' failure so the UI shows the friendly recovery notice (error
+  // shielding) rather than an endless spinner.
+  _armConnectWatchdog() {
+    this._clearConnectWatchdog();
+    this.connectTimer = setTimeout(() => {
+      this.connectTimer = null;
+      if (this.wsOpened || this.closed) return;
+      vlog('connect watchdog FIRED — socket never opened');
+      this._fail(
+        new Error(
+          `Voice connection stalled — the socket did not open within ${
+            CONNECT_TIMEOUT_MS / 1000
+          }s.`,
+        ),
+        'connection',
+      );
+      this.stop();
+    }, CONNECT_TIMEOUT_MS);
+  }
+
+  _clearConnectWatchdog() {
+    if (this.connectTimer) {
+      clearTimeout(this.connectTimer);
+      this.connectTimer = null;
+    }
+  }
+
   _handleServerEvent(raw) {
     if (typeof raw !== 'string') return; // proxy sends JSON text frames
     let event;
@@ -374,11 +440,38 @@ export default class VoiceClient {
     src.connect(ctx.destination);
 
     const startAt = Math.max(this.playHead, ctx.currentTime);
+    // First chunk of a new utterance: anchor the playback clock here so the UI
+    // can measure "how much has actually been spoken" from this instant.
+    if (this.audioStartedAt === null) this.audioStartedAt = startAt;
     src.start(startAt);
     this.playHead = startAt + buffer.duration;
+    vlog(
+      'audio chunk +' + buffer.duration.toFixed(3) + 's',
+      'scheduledEnd=' + (this.playHead - this.audioStartedAt).toFixed(2) + 's',
+    );
 
     this.scheduled.add(src);
     src.onended = () => this.scheduled.delete(src);
+  }
+
+  // Playback clock for the current utterance, in seconds:
+  //  * playedSec   — how much audio has actually been heard so far
+  //  * scheduledSec — how much audio has been scheduled (received) so far
+  // The UI reveals transcript words by the ratio of these two, so text expands
+  // in lockstep with the speaker instead of dumping ahead of the voice.
+  getPlaybackClock() {
+    const ctx = this.audioCtx;
+    if (!ctx || this.audioStartedAt === null) {
+      return { playedSec: 0, scheduledSec: 0 };
+    }
+    const playedSec = Math.max(0, ctx.currentTime - this.audioStartedAt);
+    const scheduledSec = Math.max(0, this.playHead - this.audioStartedAt);
+    return { playedSec, scheduledSec };
+  }
+
+  // Re-anchor the clock for the next utterance (called at each new turn).
+  resetAudioClock() {
+    this.audioStartedAt = null;
   }
 
   _flushPlayback() {
@@ -391,6 +484,8 @@ export default class VoiceClient {
     });
     this.scheduled.clear();
     this.playHead = this.audioCtx ? this.audioCtx.currentTime : 0;
+    // Barge-in / interruption: the current utterance is gone, so re-anchor.
+    this.audioStartedAt = null;
   }
 
   // Idempotent teardown: stop mic, tear down audio graph, close the socket,
@@ -399,6 +494,7 @@ export default class VoiceClient {
     // Mark closed FIRST so an in-flight start() awaiting mic/audio sees it and
     // aborts, instead of resurrecting the socket/capture node after teardown.
     this.closed = true;
+    this._clearConnectWatchdog();
     this._stopHeartbeat();
 
     if (this.processor) {

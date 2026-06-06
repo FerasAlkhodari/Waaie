@@ -28,6 +28,13 @@ Server -> client:
                     arrives inside ``response.output_audio.delta`` events as
                     base64; the browser decodes and plays it. Forwarding the
                     JSON untouched keeps the server off the audio-decode path.
+                    The SAME forwarded stream also carries the spoken-text
+                    transcript (``response.output_audio_transcript.delta``) and
+                    the user's whisper transcription
+                    (``conversation.item.input_audio_transcription.*``); the
+                    browser renders those as the live in-call text preview, so
+                    the on-screen words always match the audio. No DeepSeek text
+                    path is involved in a voice call.
 """
 
 import asyncio
@@ -45,6 +52,15 @@ from model import SYSTEM_INSTRUCTION
 from session import Message, SessionStore
 
 logger = logging.getLogger("waaie.voice")
+# Surface voice lifecycle logs even though uvicorn leaves the root logger at
+# WARNING (our INFO lines would otherwise be dropped). Self-contained so it
+# works under `uvicorn app:app` or pytest without extra config.
+if not logger.handlers:
+    _voice_handler = logging.StreamHandler()
+    _voice_handler.setFormatter(logging.Formatter("%(levelname)s:     %(message)s"))
+    logger.addHandler(_voice_handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
 
 REALTIME_MODEL = os.getenv("OPENAI_REALTIME_MODEL", "gpt-realtime-mini")
 REALTIME_URL = f"wss://api.openai.com/v1/realtime?model={REALTIME_MODEL}"
@@ -328,6 +344,7 @@ async def handle_voice_connection(
     history: List[Message] = sessions.history(session_id) if session_id else []
 
     await client_ws.accept()
+    logger.info("[voice] client accepted (session=%s)", session_id or "-")
 
     openai_ws = None
     tasks: list[asyncio.Task] = []
@@ -358,7 +375,9 @@ async def handle_voice_connection(
         except asyncio.TimeoutError:
             pass
 
+        logger.info("[voice] connecting upstream OpenAI Realtime...")
         openai_ws = await _connect_openai(api_key)
+        logger.info("[voice] upstream connected; sending session.update")
 
         # Configure the session (server VAD, PCM16, persona + live context).
         instructions = _voice_instructions(document, history)
@@ -378,10 +397,12 @@ async def handle_voice_connection(
             ),
             asyncio.create_task(_heartbeat(client_ws, send_lock)),
         ]
+        logger.info("[voice] relay live (client<->OpenAI + heartbeat)")
 
         # Whichever finishes first (a disconnect, an error, or the timeout)
-        # ends the call; the hard cap bounds cost on a runaway connection.
-        done, pending = await asyncio.wait(
+        # ends the call; the hard cap bounds cost on a runaway connection. The
+        # still-pending tasks are torn down uniformly in the finally block.
+        done, _pending = await asyncio.wait(
             tasks,
             timeout=MAX_CALL_SECONDS,
             return_when=asyncio.FIRST_COMPLETED,
@@ -401,6 +422,7 @@ async def handle_voice_connection(
     except Exception as exc:  # upstream connect failure, network drop, etc.
         logger.warning("Voice bridge failed: %r", exc)
     finally:
+        logger.info("[voice] tearing down call (session=%s)", session_id or "-")
         # 1) Cancel both relay tasks and await their unwind.
         for task in tasks:
             task.cancel()

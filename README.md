@@ -85,9 +85,9 @@ flowchart LR
 | Layer        | Technologies                                                                              |
 | ------------ | ----------------------------------------------------------------------------------------- |
 | **Frontend** | React.js · Tailwind CSS · react-markdown + remark-gfm · axios · Cairo font                 |
-| **Backend**  | FastAPI (Python) · Uvicorn · `openai` SDK · `pypdf` · `python-docx` · `openpyxl` · Pydantic |
+| **Backend**  | FastAPI (Python) · Uvicorn · `openai` SDK · `pdfplumber` · `python-docx` · `openpyxl` · Pydantic |
 | **AI**       | DeepSeek-V3 (`deepseek-chat`) via the OpenAI compatibility layer                           |
-| **Testing**  | pytest · httpx                                                                             |
+| **Testing**  | pytest · httpx · reportlab · arabic-reshaper · python-bidi                                 |
 
 ### Repository layout
 

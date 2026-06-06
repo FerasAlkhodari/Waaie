@@ -41,3 +41,22 @@ def ignore_warnings():
         warnings.filterwarnings("ignore", category=UserWarning)
         warnings.filterwarnings("ignore", category=DeprecationWarning)
         yield
+
+
+@pytest.fixture(autouse=True)
+def disable_rate_limiter():
+    """Turn the per-client rate limiter OFF for the test process only.
+
+    The limiter's in-memory window is shared across the whole session, so a suite
+    that legitimately calls a rate-limited endpoint more than RATE_LIMIT times
+    would otherwise get spurious 429s — an artefact of test volume, not of the
+    behaviour under test (no test asserts rate limiting). Production keeps the
+    limiter fully enabled; only this process disables it.
+    """
+    try:
+        from app import limiter
+
+        limiter.enabled = False
+    except Exception:  # pragma: no cover - app import is exercised everywhere else
+        pass
+    yield

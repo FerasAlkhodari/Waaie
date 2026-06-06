@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import BrandLogo from './BrandLogo';
 import ProfileWidget from './ProfileWidget';
-import { PlusIcon, TrashIcon, CloseIcon, ChatIcon } from './icons';
+import EcosystemBar from './EcosystemBar';
+import { PlusIcon, TrashIcon, CloseIcon, ChatIcon, BankIcon } from './icons';
 
 function SessionRow({ session, isActive, onSelect, onDelete }) {
   const [confirming, setConfirming] = useState(false);
@@ -63,8 +64,11 @@ function SessionRow({ session, isActive, onSelect, onDelete }) {
 function Sidebar({
   sessions,
   activeSessionId,
+  activeView = 'chat',
   onNew,
   onSelect,
+  onOpenQuiz,
+  onOpenEcosystem,
   onDelete,
   isOpen,
   onClose,
@@ -72,6 +76,7 @@ function Sidebar({
   onEditProfile,
 }) {
   const ordered = [...sessions].sort((a, b) => b.timestamp - a.timestamp);
+  const quizActive = activeView === 'quiz';
 
   const handleSelect = (id) => {
     onSelect(id);
@@ -80,6 +85,16 @@ function Sidebar({
 
   const handleNew = () => {
     onNew();
+    onClose();
+  };
+
+  const handleOpenQuiz = () => {
+    onOpenQuiz?.();
+    onClose();
+  };
+
+  const handleOpenEcosystem = () => {
+    onOpenEcosystem?.();
     onClose();
   };
 
@@ -117,8 +132,8 @@ function Sidebar({
           </button>
         </div>
 
-        {/* New chat */}
-        <div className="px-3 pt-3">
+        {/* Primary nav: new chat + question bank */}
+        <div className="space-y-2 px-3 pt-3">
           <button
             type="button"
             onClick={handleNew}
@@ -127,6 +142,20 @@ function Sidebar({
             <PlusIcon className="h-4 w-4" />
             محادثة جديدة
           </button>
+          <button
+            type="button"
+            onClick={handleOpenQuiz}
+            aria-pressed={quizActive}
+            className={`flex w-full items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold transition-all ${
+              quizActive
+                ? 'border-accent/50 bg-accent/10 text-accent shadow-glow-accent'
+                : 'border-slate-800 bg-slate-900/60 text-slate-200 hover:border-accent/50 hover:text-accent'
+            }`}
+          >
+            <BankIcon className="h-4 w-4" />
+            بنك الأسئلة
+          </button>
+          <EcosystemBar onOpen={handleOpenEcosystem} />
         </div>
 
         {/* Sessions */}

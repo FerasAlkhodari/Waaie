@@ -42,6 +42,17 @@ def test_get_answer_arabic(mentor):
         "Arabic question should yield an answer containing Arabic script."
 
 
+def test_stream_answer_yields_deltas(mentor):
+    """Streaming yields a sequence of text deltas that reconstruct a non-empty
+    answer equivalent to the blocking path."""
+    deltas = list(mentor.stream_answer("What is the CPU?"))
+
+    assert deltas, "Streaming should yield at least one delta."
+    assert all(isinstance(d, str) for d in deltas)
+    reconstructed = "".join(deltas).strip()
+    assert reconstructed == mentor.get_answer("What is the CPU?")["answer"]
+
+
 def test_empty_question(mentor):
     with pytest.raises(ValueError, match="Question cannot be empty"):
         mentor.get_answer("")

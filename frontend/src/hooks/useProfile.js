@@ -45,14 +45,5 @@ export default function useProfile() {
     setProfile(clean);
   }, []);
 
-  const clearProfile = useCallback(() => {
-    try {
-      window.localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      /* noop */
-    }
-    setProfile(null);
-  }, []);
-
-  return { profile, saveProfile, clearProfile };
+  return { profile, saveProfile };
 }

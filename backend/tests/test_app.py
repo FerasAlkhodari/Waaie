@@ -1,3 +1,4 @@
+import json
 import re
 
 import pytest
@@ -5,9 +6,18 @@ from fastapi.testclient import TestClient
 
 import app as app_module
 from app import app
-from tests.contract import MIXED_IN_SCOPE_ANSWER, REFUSAL_MESSAGE
+from tests.contract import EN_ANSWER, MIXED_IN_SCOPE_ANSWER, REFUSAL_MESSAGE
 
 client = TestClient(app)
+
+
+def _collect_sse(body):
+    """Parse a Server-Sent Events body into a list of decoded event dicts."""
+    events = []
+    for line in body.splitlines():
+        if line.startswith("data:"):
+            events.append(json.loads(line[len("data:") :].strip()))
+    return events
 
 
 def test_root_index():
@@ -65,6 +75,65 @@ def test_oversized_question():
 def test_ask_get_not_allowed():
     response = client.get("/ask")
     assert response.status_code == 405
+
+
+# --------------------------------------------------------------------------- #
+# Token streaming — POST /ask-stream emits SSE meta/delta/done frames.
+# --------------------------------------------------------------------------- #
+
+def test_ask_stream_success():
+    response = client.post("/ask-stream", json={"question": "What is the CPU?"})
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+
+    events = _collect_sse(response.text)
+    types = [e["type"] for e in events]
+
+    # Protocol: a leading meta frame, one or more deltas, a terminal done frame.
+    assert types[0] == "meta"
+    assert types[-1] == "done"
+    assert "delta" in types
+
+    meta = events[0]
+    assert meta["language"] == "en"
+    assert meta["session_id"]
+
+    # Deltas reconstruct the full in-scope answer.
+    streamed = "".join(e["text"] for e in events if e["type"] == "delta").strip()
+    assert streamed == EN_ANSWER
+
+
+def test_ask_stream_arabic_language_flag():
+    response = client.post(
+        "/ask-stream", json={"question": "ما هو المعالج المركزي؟"}
+    )
+    assert response.status_code == 200
+    events = _collect_sse(response.text)
+    assert events[0]["type"] == "meta"
+    assert events[0]["language"] == "ar"
+    assert events[-1]["type"] == "done"
+
+
+def test_ask_stream_invalid_input_rejected():
+    # Validation still applies before streaming starts (empty question).
+    response = client.post("/ask-stream", json={"question": ""})
+    assert response.status_code == 422
+
+
+def test_answer_events_is_async_generator():
+    """Regression guard: the SSE generator MUST be an async generator.
+
+    A *sync* generator wrapped in ``StreamingResponse`` silently yields an EMPTY
+    body on newer runtimes (Python 3.14 / Starlette 1.x) — the endpoint returns
+    200 but streams zero tokens, so the live chat typing/word-by-word stops.
+    Pinning the async shape keeps that breakage from sneaking back in (it can
+    pass by luck on older Python but breaks the deployed path)."""
+    import inspect
+
+    assert inspect.isasyncgenfunction(app_module._answer_events), (
+        "_answer_events must be `async def` (an async generator); a sync "
+        "generator produces an empty StreamingResponse body on Starlette 1.x."
+    )
 
 
 @pytest.mark.parametrize("invalid_input", [
