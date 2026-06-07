@@ -60,7 +60,7 @@ export const ECOSYSTEM = [
       'تحليل ذكي لمستوى الطالب وتحديد مكامن الضعف والقوة لتوجيه المذاكرة',
       'بنك أسئلة متجدد يغطي كافة الأقسام الكمية واللفظية والعلمية',
     ],
-    url: 'https://nibras-prep-hub.base44.app/',
+    url: 'https://npras-hup.base44.app/',
   },
   {
     key: 'vision-guide',
@@ -76,7 +76,7 @@ export const ECOSYSTEM = [
       'تقديم سياقات تاريخية وجغرافية وسياحية دقيقة وسريعة للمهتمين والسياح',
       'واجهة محادثات ذكية مبسطة لاستخلاص الأرقام والمستهدفات الوطنية بسلاسة',
     ],
-    url: 'https://vision-guide-saudi.base44.app/',
+    url: 'https://vision-saudi-guide.base44.app/',
   },
   {
     key: 'qudra-assistant',
